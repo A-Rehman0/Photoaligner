@@ -365,17 +365,25 @@ def get_bytes(src) -> bytes:
 
 @st.cache_data(show_spinner=False)
 def prepare_ref(data: bytes, max_side: int = 1280):
-    """Resize the reference so the page stays light; keep transparency if any."""
-    img = ImageOps.exif_transpose(Image.open(io.BytesIO(data)))
-    img.thumbnail((max_side, max_side))
-    buf = io.BytesIO()
-    if img.mode in ("RGBA", "LA", "P"):
-        img.convert("RGBA").save(buf, "PNG")
-        mime = "image/png"
-    else:
-        img.convert("RGB").save(buf, "JPEG", quality=85)
-        mime = "image/jpeg"
-    return mime, base64.b64encode(buf.getvalue()).decode()
+    try:
+        with Image.open(io.BytesIO(data)) as source:
+            img = ImageOps.exif_transpose(source)
+            img.load()
+            img.thumbnail((max_side, max_side))
+
+            buf = io.BytesIO()
+            if "A" in img.getbands() or img.mode == "P":
+                img.convert("RGBA").save(buf, format="PNG")
+                mime = "image/png"
+            else:
+                img.convert("RGB").save(buf, format="JPEG", quality=85)
+                mime = "image/jpeg"
+
+            return mime, base64.b64encode(buf.getvalue()).decode("utf-8")
+
+    except Exception as e:
+        st.error(f"Cannot open reference image. Check that it is a valid image file. Details: {e}")
+        st.stop()
 
 
 def jump_to_missing():

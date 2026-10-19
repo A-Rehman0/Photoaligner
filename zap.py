@@ -31,7 +31,7 @@ st.markdown(
 
 # ---------------------------------------------------------------- CONFIG
 # >>> PUT THE PATH OF YOUR IMAGES FOLDER HERE (png / jpg / jpeg / webp) <<<
-REFERENCE_DIR = Path(r"job_20261019")
+REFERENCE_DIR = Path(r"job_20261019/")
 EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 
 COMPONENT_HTML = r'''<!DOCTYPE html>

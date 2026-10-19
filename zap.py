@@ -1,12 +1,14 @@
 """
-Multi-reference overlay photo capture (mobile friendly).
+Overlay photo capture for MANY reference images (mobile friendly).
 
 Single file. Run:  streamlit run zap.py
-(The overlay_cam/index.html helper file is created automatically.)
+
+Reference images are loaded from the folder set in REFERENCE_DIR (see CONFIG below).
 """
 import base64
 import io
 import re
+import tempfile
 import time
 import zipfile
 from pathlib import Path
@@ -22,11 +24,15 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Tighter padding on phones
 st.markdown(
     "<style>.block-container{padding-top:1rem;padding-left:.6rem;padding-right:.6rem;}</style>",
     unsafe_allow_html=True,
 )
+
+# ---------------------------------------------------------------- CONFIG
+# >>> PUT THE PATH OF YOUR IMAGES FOLDER HERE (png / jpg / jpeg / webp) <<<
+REFERENCE_DIR = Path(r"captures\job_20261019")
+EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 
 COMPONENT_HTML = r'''<!DOCTYPE html>
 <html>
@@ -36,81 +42,94 @@ COMPONENT_HTML = r'''<!DOCTYPE html>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; padding: 4px; font-family: -apple-system, Segoe UI, Roboto, sans-serif; color: #31333f; touch-action: manipulation; }
-  #title { text-align: center; font-weight: 600; font-size: 16px; margin: 2px 0 6px; word-break: break-all; }
-  #title small { font-weight: 400; color: #777; display: block; font-size: 13px; }
-
-  #thumbs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 6px; }
-  .th { position: relative; flex: 0 0 auto; width: 52px; height: 52px; border: 2px solid transparent; border-radius: 8px; overflow: hidden; background: #ddd; }
-  .th img { width: 100%; height: 100%; object-fit: cover; }
-  .th.cur { border-color: #ff4b4b; }
-  .th.done::after { content: "\2713"; position: absolute; right: 2px; bottom: 2px; background: #1db954; color: #fff; font-size: 11px; width: 16px; height: 16px; line-height: 16px; text-align: center; border-radius: 50%; }
 
   #stage { display: flex; justify-content: center; }
-  #wrap { position: relative; background: #000; overflow: hidden; border-radius: 12px; width: 100%; aspect-ratio: 3/4; }
+  #wrap { position: relative; background: #000; overflow: hidden; border-radius: 18px; width: 100%; aspect-ratio: 9/16; }
   #video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   #overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; opacity: .5; }
   #grid { position: absolute; inset: 0; pointer-events: none; display: none;
           background-image: linear-gradient(rgba(255,255,255,.35) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.35) 1px, transparent 1px);
           background-size: 33.333% 33.333%; }
   #flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .25s; }
-  .chip { position: absolute; top: 8px; width: 42px; height: 42px; border-radius: 50%; border: 0; background: rgba(0,0,0,.45); color: #fff; font-size: 20px; padding: 0; }
-  #flip { right: 8px; }
-  #eye { left: 8px; }
 
-  .bar { display: flex; justify-content: center; align-items: center; gap: 30px; margin: 12px 0 8px; }
-  .round { width: 52px; height: 52px; border-radius: 50%; border: 0; background: #555; color: #fff; font-size: 20px; padding: 0; }
-  .round:disabled { opacity: .35; }
-  .shutter { width: 76px; height: 76px; border-radius: 50%; border: 4px solid #ff4b4b; background: #fff; box-shadow: inset 0 0 0 4px #fff, inset 0 0 0 40px #ff4b4b; padding: 0; }
-  .shutter:active { transform: scale(.93); }
+  .chip { position: absolute; width: 42px; height: 42px; border-radius: 50%; border: 0; background: rgba(0,0,0,.45); color: #fff; font-size: 20px; padding: 0; }
+  #eye  { top: 10px; left: 10px; }
+  #flip { top: 10px; right: 10px; }
+  #fs   { top: 60px; right: 10px; }
+  #info { position: absolute; top: 14px; left: 62px; right: 62px; text-align: center; color: #fff; font-size: 13px; line-height: 1.25;
+          background: rgba(0,0,0,.45); border-radius: 14px; padding: 5px 8px; pointer-events: none; word-break: break-all; }
 
-  .row { display: flex; align-items: center; gap: 10px; margin: 8px 4px; font-size: 14px; }
-  .row input[type=range] { flex: 1; height: 28px; }
-  .row .v { width: 44px; text-align: right; }
-  details { margin: 6px 4px; font-size: 14px; }
+  .hud { position: absolute; left: 0; right: 0; bottom: 0; padding: 26px 12px 16px; color: #fff;
+         background: linear-gradient(transparent, rgba(0,0,0,.6)); }
+  .row { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-bottom: 10px; }
+  .row input[type=range] { flex: 1; height: 26px; }
+  .row .v { width: 40px; text-align: right; }
+  .bar { display: flex; justify-content: center; align-items: center; gap: 34px; }
+  .round { width: 50px; height: 50px; border-radius: 50%; border: 0; background: rgba(255,255,255,.25); color: #fff; font-size: 20px; padding: 0; }
+  .round:disabled { opacity: .3; }
+  .shutter { width: 72px; height: 72px; border-radius: 50%; border: 4px solid #fff; background: #ff4b4b; box-shadow: inset 0 0 0 4px rgba(0,0,0,.35); padding: 0; }
+  .shutter:active { transform: scale(.92); }
+
+  details { margin: 8px 4px; font-size: 14px; }
   summary { cursor: pointer; padding: 6px 0; }
-  details label { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+  details label, details .line { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+  details select { font-size: 14px; padding: 4px; }
+  details input[type=range] { flex: 1; }
   #msg { color: #c00; font-size: 14px; margin: 6px 4px; }
 
-  @media (prefers-color-scheme: dark) {
-    body { color: #eee; }
-    #title small { color: #aaa; }
-  }
+  /* Fullscreen "camera app" mode */
+  body.fs { padding: 0; background: #000; overflow: hidden; }
+  body.fs #wrap { border-radius: 0; }
+  body.fs details { display: none; }
+  body.fs #msg { position: fixed; top: 60px; left: 10px; right: 70px; color: #fff; background: rgba(160,0,0,.8); border-radius: 8px; padding: 6px; z-index: 5; }
+
+  @media (prefers-color-scheme: dark) { body { color: #eee; } }
 </style>
 </head>
 <body>
-  <div id="title">-</div>
-  <div id="thumbs"></div>
-
   <div id="stage">
     <div id="wrap">
       <video id="video" autoplay playsinline muted></video>
       <img id="overlay">
       <div id="grid"></div>
       <div id="flash"></div>
+
       <button class="chip" id="eye" title="Show / hide reference">&#128065;</button>
+      <div id="info">-</div>
       <button class="chip" id="flip" title="Switch camera">&#128260;</button>
+      <button class="chip" id="fs" title="Fullscreen camera">&#9974;</button>
+
+      <div class="hud">
+        <div class="row">
+          <span>Opacity</span>
+          <input type="range" id="opacity" min="0" max="100" value="50">
+          <span class="v" id="opv">50%</span>
+        </div>
+        <div class="bar">
+          <button class="round" id="prev">&#9664;</button>
+          <button class="shutter" id="snap" aria-label="Capture"></button>
+          <button class="round" id="next">&#9654;</button>
+        </div>
+      </div>
     </div>
   </div>
   <div id="msg"></div>
 
-  <div class="bar">
-    <button class="round" id="prev">&#9664;</button>
-    <button class="shutter" id="snap" aria-label="Capture"></button>
-    <button class="round" id="next">&#9654;</button>
-  </div>
-
-  <div class="row">
-    <span>Opacity</span>
-    <input type="range" id="opacity" min="0" max="100" value="50">
-    <span class="v" id="opv">50%</span>
-  </div>
-
   <details>
     <summary>More options</summary>
-    <div class="row">
+    <div class="line">
+      <span>Shape</span>
+      <select id="aspect">
+        <option value="0.5625" selected>Phone screen 9:16</option>
+        <option value="0.75">Portrait 3:4</option>
+        <option value="1">Square 1:1</option>
+        <option value="1.3333">Landscape 4:3</option>
+      </select>
+    </div>
+    <div class="line">
       <span>Scale</span>
       <input type="range" id="scale" min="50" max="200" value="100">
-      <span class="v" id="scv">100%</span>
+      <span id="scv">100%</span>
     </div>
     <label><input type="checkbox" id="show" checked> Show reference overlay</label>
     <label><input type="checkbox" id="gridcb"> Grid lines</label>
@@ -124,67 +143,96 @@ function send(type, data) {
   window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data || {}), "*");
 }
 function setValue(v) { send("streamlit:setComponentValue", { value: v, dataType: "json" }); }
-function setHeight() { send("streamlit:setFrameHeight", { height: document.documentElement.scrollHeight + 8 }); }
+function setHeight() {
+  if (fs) return;
+  send("streamlit:setFrameHeight", { height: document.documentElement.scrollHeight + 8 });
+}
+function uid() { return Date.now() + "-" + Math.random().toString(36).slice(2); }
 
 // ---------- State ----------
-let refs = [], done = new Set(), idx = 0, quality = 0.92, refsKey = "";
+let cur = null, meta = {}, curKey = "", quality = 0.92;
 let facing = "environment", stream = null;
+let aspect = 9 / 16;                 // box shape when not fullscreen
+let fs = false, pseudo = false;
+let pending = {};                    // captures not yet confirmed saved by Python
 
 const $ = id => document.getElementById(id);
 const video = $("video"), overlay = $("overlay"), wrap = $("wrap");
 
-// ---------- Sizing: portrait on phones, never taller than the screen ----------
-function parentH() {
-  try { return window.parent.innerHeight; } catch (e) { return window.screen.height; }
+function emit(nav) {                 // one message carries nav request + all unconfirmed captures
+  setValue({ id: uid(), nav: nav || null, captures: Object.values(pending) });
 }
+
+// ---------- Sizing ----------
+function parentH() {
+  try { return window.parent.innerHeight; } catch (e) { return window.screen.availHeight; }
+}
+function curAspect() { return fs ? window.innerWidth / window.innerHeight : aspect; }
 function fit() {
-  const portrait = parentH() >= document.body.clientWidth;
-  const vw = video.videoWidth || (portrait ? 3 : 4);
-  const vh = video.videoHeight || (portrait ? 4 : 3);
+  if (fs) {
+    wrap.style.width = window.innerWidth + "px";
+    wrap.style.height = window.innerHeight + "px";
+    wrap.style.aspectRatio = "auto";
+    return;
+  }
   const W = document.body.clientWidth - 8;
-  const maxH = Math.max(300, parentH() * 0.62);
-  let w = W, h = W * vh / vw;
-  if (h > maxH) { h = maxH; w = h * vw / vh; }
-  wrap.style.width = w + "px";
-  wrap.style.height = h + "px";
+  const maxH = Math.max(360, parentH() * 0.82);
+  let w = W, h = W / aspect;
+  if (h > maxH) { h = maxH; w = h * aspect; }
+  wrap.style.width = Math.round(w) + "px";
+  wrap.style.height = Math.round(h) + "px";
   wrap.style.aspectRatio = "auto";
   setHeight();
 }
-video.addEventListener("loadedmetadata", fit);
-video.addEventListener("resize", fit);
 window.addEventListener("resize", fit);
-window.addEventListener("orientationchange", () => setTimeout(() => { startCamera(); fit(); }, 300));
+window.addEventListener("orientationchange", () => setTimeout(fit, 300));
+
+// ---------- Fullscreen camera mode ----------
+function pseudoFS(on) {
+  const fe = window.frameElement;
+  if (!fe) return false;
+  if (on) {
+    if (fe.dataset.oldStyle === undefined) fe.dataset.oldStyle = fe.getAttribute("style") || "";
+    fe.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:" + parentH() + "px;z-index:999999;border:0;background:#000;";
+    return true;
+  }
+  if (fe.dataset.oldStyle !== undefined) {
+    fe.setAttribute("style", fe.dataset.oldStyle);
+    delete fe.dataset.oldStyle;
+  }
+  return false;
+}
+async function enterFS() {
+  fs = true;
+  document.body.classList.add("fs");
+  $("fs").innerHTML = "&#10005;";
+  try {
+    if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
+  } catch (e) { /* fall back below */ }
+  if (!document.fullscreenElement) pseudo = pseudoFS(true);   // iPhone / blocked: fill the page instead
+  setTimeout(fit, 150);
+  setTimeout(fit, 500);
+}
+function exitFS() {
+  fs = false;
+  document.body.classList.remove("fs");
+  $("fs").innerHTML = "&#9974;";
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (pseudo) { pseudoFS(false); pseudo = false; }
+  setTimeout(() => { fit(); setHeight(); }, 150);
+}
+$("fs").onclick = () => (fs ? exitFS() : enterFS());
+document.addEventListener("fullscreenchange", () => {
+  if (fs && !pseudo && !document.fullscreenElement) exitFS();
+});
 
 // ---------- Rendering ----------
-function renderThumbs() {
-  const box = $("thumbs");
-  box.innerHTML = "";
-  refs.forEach((r, i) => {
-    const d = document.createElement("div");
-    d.className = "th" + (i === idx ? " cur" : "") + (done.has(r.stem) ? " done" : "");
-    d.innerHTML = '<img src="' + r.src + '">';
-    d.onclick = () => go(i);
-    box.appendChild(d);
-  });
-  const cur = box.querySelector(".cur");
-  if (cur) cur.scrollIntoView({ inline: "center", block: "nearest" });
-}
-
-function renderCurrent() {
-  if (!refs.length) return;
-  const r = refs[idx];
-  overlay.src = r.src;
-  $("title").innerHTML = r.name + "<small>" + (idx + 1) + " / " + refs.length +
-    " &middot; " + done.size + " captured" + (done.has(r.stem) ? " &middot; &#10003; tap shutter to retake" : "") + "</small>";
-  $("prev").disabled = idx === 0;
-  $("next").disabled = idx === refs.length - 1;
-  renderThumbs();
-  setHeight();
-}
-
-function go(i) {
-  idx = Math.max(0, Math.min(refs.length - 1, i));
-  renderCurrent();
+function renderInfo() {
+  if (!cur) return;
+  $("info").innerHTML = cur.name + "<br>" + (meta.index + 1) + " / " + meta.total + " &middot; " +
+    meta.doneCount + " captured" + (meta.isDone ? " &#10003;" : "");
+  $("prev").disabled = !meta.prev;
+  $("next").disabled = !meta.next;
 }
 
 function applyOverlay() {
@@ -199,13 +247,15 @@ function applyOverlay() {
 applyOverlay();
 
 $("eye").onclick = () => { $("show").checked = !$("show").checked; applyOverlay(); };
+$("aspect").onchange = () => { aspect = parseFloat($("aspect").value); fit(); startCamera(); };
 
 // ---------- Camera ----------
 async function startCamera() {
   if (stream) stream.getTracks().forEach(t => t.stop());
-  const portrait = parentH() >= document.body.clientWidth;
-  const size = portrait ? { width: { ideal: 1536 }, height: { ideal: 2048 } }
-                        : { width: { ideal: 2048 }, height: { ideal: 1536 } };
+  const a = curAspect();
+  let size;
+  if (a < 1) size = { width: { ideal: Math.round(1920 * a) }, height: { ideal: 1920 } };
+  else       size = { width: { ideal: 1920 }, height: { ideal: Math.round(1920 / a) } };
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       video: Object.assign({ facingMode: facing }, size), audio: false
@@ -218,41 +268,48 @@ async function startCamera() {
 }
 $("flip").onclick = () => { facing = facing === "environment" ? "user" : "environment"; startCamera(); };
 
-// ---------- Capture ----------
+// ---------- Capture: crop to exactly what the box shows ----------
 function capture() {
-  if (!video.videoWidth || !refs.length) return;
-  const c = document.createElement("canvas");
-  c.width = video.videoWidth; c.height = video.videoHeight;
-  const ctx = c.getContext("2d");
-  ctx.drawImage(video, 0, 0, c.width, c.height);
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !cur) return;
+  const a = curAspect();
 
-  if ($("burn").checked && $("show").checked) {
+  let sw = vw, sh = vh;
+  if (vw / vh > a) sw = vh * a; else sh = vw / a;
+  const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
+
+  const c = document.createElement("canvas");
+  c.width = Math.round(sw); c.height = Math.round(sh);
+  const ctx = c.getContext("2d");
+  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, c.width, c.height);
+
+  if ($("burn").checked && $("show").checked && overlay.naturalWidth) {
     const s = $("scale").value / 100;
-    const fitS = Math.min(c.width / overlay.naturalWidth, c.height / overlay.naturalHeight) * s;
-    const w = overlay.naturalWidth * fitS, h = overlay.naturalHeight * fitS;
+    const f = Math.min(c.width / overlay.naturalWidth, c.height / overlay.naturalHeight) * s;
+    const w = overlay.naturalWidth * f, h = overlay.naturalHeight * f;
     ctx.globalAlpha = $("opacity").value / 100;
     ctx.drawImage(overlay, (c.width - w) / 2, (c.height - h) / 2, w, h);
     ctx.globalAlpha = 1;
   }
 
-  const r = refs[idx];
-  setValue({ id: Date.now() + "-" + Math.random(), stem: r.stem, name: r.name,
-             data: c.toDataURL("image/jpeg", quality) });
-  done.add(r.stem);
+  const capId = uid();
+  pending[capId] = { capId: capId, stem: cur.stem, name: cur.name, data: c.toDataURL("image/jpeg", quality) };
 
   if (navigator.vibrate) navigator.vibrate(30);
   $("flash").style.opacity = .8;
   setTimeout(() => $("flash").style.opacity = 0, 120);
 
-  if ($("auto").checked && idx < refs.length - 1) go(idx + 1); else renderCurrent();
+  const goNext = $("auto").checked && meta.next;
+  emit(goNext ? meta.next : null);
 }
 
 $("snap").onclick = capture;
-$("prev").onclick = () => go(idx - 1);
-$("next").onclick = () => go(idx + 1);
+$("prev").onclick = () => { if (meta.prev) emit(meta.prev); };
+$("next").onclick = () => { if (meta.next) emit(meta.next); };
 document.addEventListener("keydown", e => {
-  if (e.key === "ArrowLeft") go(idx - 1);
-  else if (e.key === "ArrowRight") go(idx + 1);
+  if (e.target && e.target.tagName === "SELECT") return;
+  if (e.key === "ArrowLeft" && meta.prev) emit(meta.prev);
+  else if (e.key === "ArrowRight" && meta.next) emit(meta.next);
   else if (e.key === " " || e.key === "Enter") { e.preventDefault(); capture(); }
 });
 
@@ -261,14 +318,16 @@ window.addEventListener("message", e => {
   if (!e.data || e.data.type !== "streamlit:render") return;
   const a = e.data.args || {};
   quality = a.quality || 0.92;
-  done = new Set(a.done || []);
-  const key = (a.refs || []).map(r => r.stem + ":" + r.src.length).join("|");
-  if (key !== refsKey) {
-    refsKey = key;
-    refs = a.refs || [];
-    idx = 0;
+  (a.acked || []).forEach(id => { delete pending[id]; });
+
+  if (a.current) {
+    const key = a.current.stem + ":" + a.current.src.length;
+    if (key !== curKey) { curKey = key; overlay.src = a.current.src; }
+    cur = a.current;
   }
-  renderCurrent();
+  meta = { index: a.index || 0, total: a.total || 0, doneCount: a.done_count || 0,
+           isDone: !!a.is_done, prev: a.prev_stem || null, next: a.next_stem || null };
+  renderInfo();
   fit();
 });
 
@@ -281,13 +340,13 @@ new ResizeObserver(setHeight).observe(document.body);
 </html>
 '''
 
-# Write the camera component next to this script (so you only need ONE file)
-_comp_dir = Path(__file__).parent / "overlay_cam"
+# The camera component file is written to the system temp folder (nothing is created next to this script)
+_comp_dir = Path(tempfile.gettempdir()) / "overlay_cam_component"
 _comp_dir.mkdir(exist_ok=True)
 (_comp_dir / "index.html").write_text(COMPONENT_HTML, encoding="utf-8")
 
 _camera = components.declare_component(
-    "overlay_cam", path=str(Path(__file__).parent / "overlay_cam")
+    "overlay_cam", path=str(_comp_dir)
 )
 
 
@@ -298,6 +357,10 @@ def natural_key(s: str):
 
 def safe(s: str) -> str:
     return re.sub(r"[^\w\-]+", "_", s).strip("_") or "item"
+
+
+def get_bytes(src) -> bytes:
+    return src.read_bytes() if isinstance(src, Path) else src.getvalue()
 
 
 @st.cache_data(show_spinner=False)
@@ -315,12 +378,29 @@ def prepare_ref(data: bytes, max_side: int = 1280):
     return mime, base64.b64encode(buf.getvalue()).decode()
 
 
+def jump_to_missing():
+    """Button callback: select the next reference that has no photo yet."""
+    ss = st.session_state
+    stems = ss.get("stems", [])
+    if not stems:
+        return
+    cur = stems.index(ss["sel"]) if ss.get("sel") in stems else 0
+    for s in stems[cur + 1:] + stems[:cur + 1]:
+        if s not in ss.photos:
+            ss["sel"] = s
+            return
+
+
 # ----------------------------------------------------------------- state
-if "photos" not in st.session_state:
-    st.session_state.photos = {}      # stem -> jpeg bytes
-if "last_id" not in st.session_state:
-    st.session_state.last_id = None
-photos = st.session_state.photos
+ss = st.session_state
+ss.setdefault("photos", {})        # stem -> jpeg bytes
+ss.setdefault("last_id", None)     # last camera event handled (for navigation)
+ss.setdefault("saved_ids", [])     # capture ids already saved (prevents duplicates)
+photos = ss.photos
+
+# A navigation request from the camera must be applied BEFORE the selectbox is drawn
+if "pending_sel" in ss:
+    ss["sel"] = ss.pop("pending_sel")
 
 st.subheader("📷 Reference Overlay Camera")
 
@@ -331,65 +411,105 @@ with st.expander("⚙️ Settings"):
     out_dir = st.text_input("Save folder", value="captures", disabled=not save_disk)
     quality = st.slider("JPEG quality", 60, 100, 92)
     if st.button("🗑️ Clear all captured photos"):
-        st.session_state.photos = {}
-        st.session_state.last_id = None
+        ss.photos = {}
+        ss.saved_ids = []
+        ss.last_id = None
         st.rerun()
 
 # ----------------------------------------------------------------- references
-with st.expander("📁 Reference images", expanded=not st.session_state.get("had_files", False)):
-    files = st.file_uploader(
-        "Upload reference images (one per object / position)",
+if REFERENCE_DIR.is_dir():
+    sources = [(p.name, p) for p in REFERENCE_DIR.iterdir() if p.suffix.lower() in EXTS]
+else:
+    sources = []
+    st.error(f"Images folder not found: `{REFERENCE_DIR}` - set REFERENCE_DIR near the top of the code.")
+
+with st.expander("➕ Add extra reference images for this session (optional)"):
+    uploads = st.file_uploader(
+        "Upload images",
         type=["png", "jpg", "jpeg", "webp"],
         accept_multiple_files=True,
     )
+sources += [(u.name, u) for u in (uploads or [])]
 
-if not files:
-    st.session_state.had_files = False
-    st.info("Upload one or more reference images to start the camera.")
+if not sources:
+    st.info("No reference images found. Check REFERENCE_DIR near the top of the code.")
     st.stop()
-st.session_state.had_files = True
 
-files = sorted(files, key=lambda f: natural_key(f.name))
-
-refs, seen = [], {}
-for f in files:
-    stem = safe(Path(f.name).stem)
+sources.sort(key=lambda x: natural_key(x[0]))
+by_stem, seen = {}, {}
+for name, src in sources:
+    stem = safe(Path(name).stem)
     seen[stem] = seen.get(stem, 0) + 1
     if seen[stem] > 1:
         stem = f"{stem}_{seen[stem]}"
-    mime, b64 = prepare_ref(f.getvalue())
-    refs.append({"name": f.name, "stem": stem, "src": f"data:{mime};base64,{b64}"})
+    by_stem[stem] = {"name": name, "src": src}
+stems = list(by_stem)
+ss["stems"] = stems
 
-stems = [r["stem"] for r in refs]
+if ss.get("sel") not in stems:
+    ss.pop("sel", None)
+
+# ----------------------------------------------------------------- choose reference
+c1, c2 = st.columns([5, 1])
+with c1:
+    st.selectbox(
+        "Reference photo (tap and type to search)",
+        stems,
+        key="sel",
+        format_func=lambda s: ("✅ " if s in photos else "⬜ ") + by_stem[s]["name"],
+    )
+with c2:
+    st.write("")
+    st.write("")
+    st.button("⏭", on_click=jump_to_missing, help="Jump to the next photo not captured yet")
+
+sel = ss["sel"]
+i = stems.index(sel)
+mime, b64 = prepare_ref(get_bytes(by_stem[sel]["src"]))   # only the selected image is processed
 
 # ----------------------------------------------------------------- camera
 result = _camera(
-    refs=refs,
-    done=[s for s in stems if s in photos],
+    current={"name": by_stem[sel]["name"], "stem": sel, "src": f"data:{mime};base64,{b64}"},
+    index=i,
+    total=len(stems),
+    done_count=sum(1 for s in stems if s in photos),
+    is_done=sel in photos,
+    prev_stem=stems[i - 1] if i > 0 else None,
+    next_stem=stems[i + 1] if i < len(stems) - 1 else None,
     quality=quality / 100,
+    acked=ss.saved_ids[-100:],
     key="cam",
     default=None,
 )
 
-# New capture coming from the browser?
-if result and result.get("id") != st.session_state.last_id:
-    st.session_state.last_id = result["id"]
-    jpeg = base64.b64decode(result["data"].split(",", 1)[1])
-    photos[result["stem"]] = jpeg
-    if save_disk:
-        folder = Path(out_dir) / safe(session_name)
-        folder.mkdir(parents=True, exist_ok=True)
-        (folder / f"{result['stem']}.jpg").write_bytes(jpeg)
+# Events coming from the camera: photos to save and/or "go to another reference"
+if result:
+    changed = False
+    for cap in result.get("captures") or []:
+        if cap["capId"] in ss.saved_ids or cap["stem"] not in by_stem:
+            continue
+        jpeg = base64.b64decode(cap["data"].split(",", 1)[1])
+        photos[cap["stem"]] = jpeg
+        ss.saved_ids.append(cap["capId"])
+        ss.saved_ids = ss.saved_ids[-300:]
+        if save_disk:
+            folder = Path(out_dir) / safe(session_name)
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"{cap['stem']}.jpg").write_bytes(jpeg)
+        changed = True
+
+    if result.get("nav") and result["id"] != ss.last_id:
+        ss.last_id = result["id"]
+        if result["nav"] in by_stem:
+            ss["pending_sel"] = result["nav"]
+            changed = True
+
+    if changed:
+        st.rerun()
 
 # ----------------------------------------------------------------- progress
 captured = [s for s in stems if s in photos]
-missing = [s for s in stems if s not in photos]
-
 st.progress(len(captured) / len(stems), text=f"{len(captured)} of {len(stems)} captured")
-if missing:
-    st.caption("Still missing: " + ", ".join(missing))
-else:
-    st.success("All references captured ✅")
 
 # ----------------------------------------------------------------- results
 if captured:
@@ -407,10 +527,8 @@ if captured:
     if save_disk:
         st.caption(f"Also saved in: `{(Path(out_dir) / safe(session_name)).resolve()}`")
 
-    with st.expander("Captured photos vs reference", expanded=False):
-        ref_by_stem = {r["stem"]: r for r in refs}
-        cols = st.columns(2)
-        for i, s in enumerate(captured):
-            with cols[i % 2]:
-                st.image(photos[s], caption=f"{s} (captured)")
-                st.image(ref_by_stem[s]["src"], caption="reference")
+    with st.expander(f"Captured photos ({len(captured)})"):
+        cols = st.columns(3)
+        for n, s in enumerate(captured):
+            with cols[n % 3]:
+                st.image(photos[s], caption=by_stem[s]["name"])

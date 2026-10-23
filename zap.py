@@ -1,9 +1,8 @@
 """
 Overlay photo capture for MANY reference images (mobile friendly).
 
-Single file. Run:  streamlit run zap.py
-
-Reference images are loaded from the folder set in REFERENCE_DIR (see CONFIG below).
+Run:  streamlit run zap.py
+Reference images are loaded from the folder next to this file (REFERENCE_DIR).
 """
 import base64
 import io
@@ -30,8 +29,8 @@ st.markdown(
 )
 
 # ---------------------------------------------------------------- CONFIG
-# >>> PUT THE PATH OF YOUR IMAGES FOLDER HERE (png / jpg / jpeg / webp) <<<
-REFERENCE_DIR = Path(r"job_20261019/")
+# Folder with your reference images (png / jpg / jpeg / webp), next to this file
+REFERENCE_DIR = Path(__file__).parent / "job_20261019"
 EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 
 COMPONENT_HTML = r'''<!DOCTYPE html>
@@ -59,11 +58,17 @@ COMPONENT_HTML = r'''<!DOCTYPE html>
   #info { position: absolute; top: 14px; left: 62px; right: 62px; text-align: center; color: #fff; font-size: 13px; line-height: 1.25;
           background: rgba(0,0,0,.45); border-radius: 14px; padding: 5px 8px; pointer-events: none; word-break: break-all; }
 
+  /* Assistive ball + opacity panel */
+  #ball { position: absolute; top: 40%; right: 8px; width: 52px; height: 52px; border-radius: 50%;
+          border: 2px solid #fff; background: rgba(46,125,50,.85); color: #fff; font-size: 22px;
+          padding: 0; touch-action: none; z-index: 6; }
+  #ball.off { background: rgba(183,28,28,.85); }
+  #panel { position: absolute; width: 200px; padding: 10px 12px; border-radius: 14px;
+           background: rgba(20,20,20,.88); color: #fff; display: none; z-index: 6; font-size: 13px; }
+  #panel input[type=range] { width: 100%; }
+
   .hud { position: absolute; left: 0; right: 0; bottom: 0; padding: 26px 12px 16px; color: #fff;
          background: linear-gradient(transparent, rgba(0,0,0,.6)); }
-  .row { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-bottom: 10px; }
-  .row input[type=range] { flex: 1; height: 26px; }
-  .row .v { width: 40px; text-align: right; }
   .bar { display: flex; justify-content: center; align-items: center; gap: 34px; }
   .round { width: 50px; height: 50px; border-radius: 50%; border: 0; background: rgba(255,255,255,.25); color: #fff; font-size: 20px; padding: 0; }
   .round:disabled { opacity: .3; }
@@ -99,12 +104,13 @@ COMPONENT_HTML = r'''<!DOCTYPE html>
       <button class="chip" id="flip" title="Switch camera">&#128260;</button>
       <button class="chip" id="fs" title="Fullscreen camera">&#9974;</button>
 
+      <button id="ball" title="Tap: panel | Long-press: overlay on/off | Drag: move">&#9680;</button>
+      <div id="panel">
+        Opacity <span id="opv">50%</span>
+        <input type="range" id="opacity" min="0" max="100" value="50">
+      </div>
+
       <div class="hud">
-        <div class="row">
-          <span>Opacity</span>
-          <input type="range" id="opacity" min="0" max="100" value="50">
-          <span class="v" id="opv">50%</span>
-        </div>
         <div class="bar">
           <button class="round" id="prev">&#9664;</button>
           <button class="shutter" id="snap" aria-label="Capture"></button>
@@ -242,6 +248,7 @@ function applyOverlay() {
   $("grid").style.display = $("gridcb").checked ? "block" : "none";
   $("opv").textContent = $("opacity").value + "%";
   $("scv").textContent = $("scale").value + "%";
+  $("ball").classList.toggle("off", !$("show").checked);
 }
 ["opacity", "scale", "show", "gridcb"].forEach(id => $(id).addEventListener("input", applyOverlay));
 applyOverlay();
@@ -307,7 +314,7 @@ $("snap").onclick = capture;
 $("prev").onclick = () => { if (meta.prev) emit(meta.prev); };
 $("next").onclick = () => { if (meta.next) emit(meta.next); };
 document.addEventListener("keydown", e => {
-  if (e.target && e.target.tagName === "SELECT") return;
+  if (e.target && (e.target.tagName === "SELECT" || e.target.tagName === "INPUT")) return;
   if (e.key === "ArrowLeft" && meta.prev) emit(meta.prev);
   else if (e.key === "ArrowRight" && meta.next) emit(meta.next);
   else if (e.key === " " || e.key === "Enter") { e.preventDefault(); capture(); }
@@ -331,6 +338,50 @@ window.addEventListener("message", e => {
   fit();
 });
 
+// ---------- Assistive ball: tap = panel, long-press = overlay on/off, drag = move ----------
+(function () {
+  const ball = $("ball"), panel = $("panel");
+  let sx, sy, ox, oy, moved = false, long = false, timer;
+
+  ball.addEventListener("pointerdown", e => {
+    ball.setPointerCapture(e.pointerId);
+    const r = ball.getBoundingClientRect(), w = wrap.getBoundingClientRect();
+    sx = e.clientX; sy = e.clientY; ox = r.left - w.left; oy = r.top - w.top;
+    moved = false; long = false;
+    timer = setTimeout(() => {
+      if (moved) return;
+      long = true;
+      $("show").checked = !$("show").checked;
+      applyOverlay();
+      if (navigator.vibrate) navigator.vibrate(40);
+    }, 600);
+  });
+
+  ball.addEventListener("pointermove", e => {
+    if (!ball.hasPointerCapture(e.pointerId)) return;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) { moved = true; clearTimeout(timer); }
+    if (!moved) return;
+    const w = wrap.getBoundingClientRect();
+    ball.style.left = Math.max(0, Math.min(w.width - 52, ox + dx)) + "px";
+    ball.style.top  = Math.max(0, Math.min(w.height - 52, oy + dy)) + "px";
+    ball.style.right = "auto";
+    panel.style.display = "none";
+  });
+
+  ball.addEventListener("pointercancel", () => clearTimeout(timer));
+  ball.addEventListener("pointerup", () => {
+    clearTimeout(timer);
+    if (moved || long) return;
+    if (panel.style.display === "block") { panel.style.display = "none"; return; }
+    const w = wrap.getBoundingClientRect();
+    const left = ball.offsetLeft > 220 ? ball.offsetLeft - 208 : ball.offsetLeft + 60;
+    panel.style.left = Math.max(0, Math.min(left, w.width - 210)) + "px";
+    panel.style.top = Math.max(0, Math.min(ball.offsetTop, w.height - 90)) + "px";
+    panel.style.display = "block";
+  });
+})();
+
 send("streamlit:componentReady", { apiVersion: 1 });
 fit();
 startCamera();
@@ -340,14 +391,12 @@ new ResizeObserver(setHeight).observe(document.body);
 </html>
 '''
 
-# The camera component file is written to the system temp folder (nothing is created next to this script)
+# The camera component file is written to the system temp folder
 _comp_dir = Path(tempfile.gettempdir()) / "overlay_cam_component"
 _comp_dir.mkdir(exist_ok=True)
 (_comp_dir / "index.html").write_text(COMPONENT_HTML, encoding="utf-8")
 
-_camera = components.declare_component(
-    "overlay_cam", path=str(_comp_dir)
-)
+_camera = components.declare_component("overlay_cam", path=str(_comp_dir))
 
 
 # ----------------------------------------------------------------- helpers
@@ -415,7 +464,7 @@ st.subheader("📷 Reference Overlay Camera")
 # ----------------------------------------------------------------- settings
 with st.expander("⚙️ Settings"):
     session_name = st.text_input("Session / job name", value=time.strftime("job_%Y%m%d"))
-    save_disk = st.checkbox("Also save photos on the computer running this app", value=True)
+    save_disk = st.checkbox("Also save photos on the server running this app", value=False)
     out_dir = st.text_input("Save folder", value="captures", disabled=not save_disk)
     quality = st.slider("JPEG quality", 60, 100, 92)
     if st.button("🗑️ Clear all captured photos"):
@@ -429,7 +478,7 @@ if REFERENCE_DIR.is_dir():
     sources = [(p.name, p) for p in REFERENCE_DIR.iterdir() if p.suffix.lower() in EXTS]
 else:
     sources = []
-    st.error(f"Images folder not found: `{REFERENCE_DIR}` - set REFERENCE_DIR near the top of the code.")
+    st.error(f"Images folder not found: `{REFERENCE_DIR}` - put it next to this file or change REFERENCE_DIR.")
 
 with st.expander("➕ Add extra reference images for this session (optional)"):
     uploads = st.file_uploader(
@@ -440,7 +489,7 @@ with st.expander("➕ Add extra reference images for this session (optional)"):
 sources += [(u.name, u) for u in (uploads or [])]
 
 if not sources:
-    st.info("No reference images found. Check REFERENCE_DIR near the top of the code.")
+    st.info("No reference images found. Upload some above or check REFERENCE_DIR.")
     st.stop()
 
 sources.sort(key=lambda x: natural_key(x[0]))

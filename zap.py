@@ -30,314 +30,55 @@ st.markdown(
 )
 
 # ---------------------------------------------------------------- CONFIG
-# >>> PUT THE PATH OF YOUR IMAGES FOLDER HERE (png / jpg / jpeg / webp) <<<
-REFERENCE_DIR = Path(r"job_20261019/")
+# ===== REPLACE 1: settings =====
+REFERENCE_DIR = Path(r"job_20261019/")   # your images folder
 EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+MAX_SIDE = 720 
 
-COMPONENT_HTML = r'''<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+COMPONENT_HTML = r'''<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body { margin: 0; padding: 4px; font-family: -apple-system, Segoe UI, Roboto, sans-serif; color: #31333f; touch-action: manipulation; }
-
-  #stage { display: flex; justify-content: center; }
-  #wrap { position: relative; background: #000; overflow: hidden; border-radius: 18px; width: 100%; aspect-ratio: 9/16; }
-  #video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; opacity: .5; }
-  #grid { position: absolute; inset: 0; pointer-events: none; display: none;
-          background-image: linear-gradient(rgba(255,255,255,.35) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.35) 1px, transparent 1px);
-          background-size: 33.333% 33.333%; }
-  #flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .25s; }
-
-  .chip { position: absolute; width: 42px; height: 42px; border-radius: 50%; border: 0; background: rgba(0,0,0,.45); color: #fff; font-size: 20px; padding: 0; }
-  #eye  { top: 10px; left: 10px; }
-  #flip { top: 10px; right: 10px; }
-  #fs   { top: 60px; right: 10px; }
-  #info { position: absolute; top: 14px; left: 62px; right: 62px; text-align: center; color: #fff; font-size: 13px; line-height: 1.25;
-          background: rgba(0,0,0,.45); border-radius: 14px; padding: 5px 8px; pointer-events: none; word-break: break-all; }
-
-  .hud { position: absolute; left: 0; right: 0; bottom: 0; padding: 26px 12px 16px; color: #fff;
-         background: linear-gradient(transparent, rgba(0,0,0,.6)); }
-  .row { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-bottom: 10px; }
-  .row input[type=range] { flex: 1; height: 26px; }
-  .row .v { width: 40px; text-align: right; }
-  .bar { display: flex; justify-content: center; align-items: center; gap: 34px; }
-  .round { width: 50px; height: 50px; border-radius: 50%; border: 0; background: rgba(255,255,255,.25); color: #fff; font-size: 20px; padding: 0; }
-  .round:disabled { opacity: .3; }
-  .shutter { width: 72px; height: 72px; border-radius: 50%; border: 4px solid #fff; background: #ff4b4b; box-shadow: inset 0 0 0 4px rgba(0,0,0,.35); padding: 0; }
-  .shutter:active { transform: scale(.92); }
-
-  details { margin: 8px 4px; font-size: 14px; }
-  summary { cursor: pointer; padding: 6px 0; }
-  details label, details .line { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
-  details select { font-size: 14px; padding: 4px; }
-  details input[type=range] { flex: 1; }
-  #msg { color: #c00; font-size: 14px; margin: 6px 4px; }
-
-  /* Fullscreen "camera app" mode */
-  body.fs { padding: 0; background: #000; overflow: hidden; }
-  body.fs #wrap { border-radius: 0; }
-  body.fs details { display: none; }
-  body.fs #msg { position: fixed; top: 60px; left: 10px; right: 70px; color: #fff; background: rgba(160,0,0,.8); border-radius: 8px; padding: 6px; z-index: 5; }
-
-  @media (prefers-color-scheme: dark) { body { color: #eee; } }
-</style>
-</head>
-<body>
-  <div id="stage">
-    <div id="wrap">
-      <video id="video" autoplay playsinline muted></video>
-      <img id="overlay">
-      <div id="grid"></div>
-      <div id="flash"></div>
-
-      <button class="chip" id="eye" title="Show / hide reference">&#128065;</button>
-      <div id="info">-</div>
-      <button class="chip" id="flip" title="Switch camera">&#128260;</button>
-      <button class="chip" id="fs" title="Fullscreen camera">&#9974;</button>
-
-      <div class="hud">
-        <div class="row">
-          <span>Opacity</span>
-          <input type="range" id="opacity" min="0" max="100" value="50">
-          <span class="v" id="opv">50%</span>
-        </div>
-        <div class="bar">
-          <button class="round" id="prev">&#9664;</button>
-          <button class="shutter" id="snap" aria-label="Capture"></button>
-          <button class="round" id="next">&#9654;</button>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div id="msg"></div>
-
-  <details>
-    <summary>More options</summary>
-    <div class="line">
-      <span>Shape</span>
-      <select id="aspect">
-        <option value="0.5625" selected>Phone screen 9:16</option>
-        <option value="0.75">Portrait 3:4</option>
-        <option value="1">Square 1:1</option>
-        <option value="1.3333">Landscape 4:3</option>
-      </select>
-    </div>
-    <div class="line">
-      <span>Scale</span>
-      <input type="range" id="scale" min="50" max="200" value="100">
-      <span id="scv">100%</span>
-    </div>
-    <label><input type="checkbox" id="show" checked> Show reference overlay</label>
-    <label><input type="checkbox" id="gridcb"> Grid lines</label>
-    <label><input type="checkbox" id="auto" checked> Go to next reference after capture</label>
-    <label><input type="checkbox" id="burn"> Burn overlay into saved photo</label>
-  </details>
-
+*{box-sizing:border-box}body{margin:0;padding:4px;font-family:sans-serif;color:#31333f}
+#cv{width:100%;max-height:60vh;object-fit:contain;background:#000;border-radius:14px;display:block}
+.r{display:flex;gap:8px;margin-top:8px}
+button{flex:1;font-size:16px;padding:12px;border:0;border-radius:10px;background:#eee}
+#pip{background:#ff4b4b;color:#fff;flex:3}
+video{position:absolute;width:1px;height:1px;opacity:0}
+@media(prefers-color-scheme:dark){body{color:#eee}}
+</style></head><body>
+<canvas id="cv" width="720" height="1280"></canvas><video id="v" muted playsinline></video>
+<div class="r"><button id="p">◀</button><button id="pip">🎈 Float over apps</button><button id="n">▶</button></div>
+<div id="m" style="font-size:13px;margin-top:6px"></div>
 <script>
-// ---------- Streamlit component protocol (no build step needed) ----------
-function send(type, data) {
-  window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data || {}), "*");
+const $=i=>document.getElementById(i),cv=$("cv"),x=cv.getContext("2d"),v=$("v"),im=new Image();
+let L=[],i=0,sig="",timer=null;
+const post=(t,d)=>parent.postMessage({isStreamlitMessage:true,type:t,...d},"*");
+const H=()=>post("streamlit:setFrameHeight",{height:document.documentElement.scrollHeight+8});
+function draw(){
+  x.fillStyle="#000";x.fillRect(0,0,720,1280);
+  if(im.naturalWidth){const f=Math.min(720/im.naturalWidth,1280/im.naturalHeight),w=im.naturalWidth*f,h=im.naturalHeight*f;x.drawImage(im,(720-w)/2,(1280-h)/2,w,h);}
+  if(L.length){x.fillStyle="rgba(0,0,0,.6)";x.fillRect(0,0,720,64);x.fillStyle="#fff";x.font="30px sans-serif";x.fillText((i+1)+"/"+L.length+"  "+L[i].n.slice(0,34),14,43);}
 }
-function setValue(v) { send("streamlit:setComponentValue", { value: v, dataType: "json" }); }
-function setHeight() {
-  if (fs) return;
-  send("streamlit:setFrameHeight", { height: document.documentElement.scrollHeight + 8 });
-}
-function uid() { return Date.now() + "-" + Math.random().toString(36).slice(2); }
-
-// ---------- State ----------
-let cur = null, meta = {}, curKey = "", quality = 0.92;
-let facing = "environment", stream = null;
-let aspect = 9 / 16;                 // box shape when not fullscreen
-let fs = false, pseudo = false;
-let pending = {};                    // captures not yet confirmed saved by Python
-
-const $ = id => document.getElementById(id);
-const video = $("video"), overlay = $("overlay"), wrap = $("wrap");
-
-function emit(nav) {                 // one message carries nav request + all unconfirmed captures
-  setValue({ id: uid(), nav: nav || null, captures: Object.values(pending) });
-}
-
-// ---------- Sizing ----------
-function parentH() {
-  try { return window.parent.innerHeight; } catch (e) { return window.screen.availHeight; }
-}
-function curAspect() { return fs ? window.innerWidth / window.innerHeight : aspect; }
-function fit() {
-  if (fs) {
-    wrap.style.width = window.innerWidth + "px";
-    wrap.style.height = window.innerHeight + "px";
-    wrap.style.aspectRatio = "auto";
-    return;
-  }
-  const W = document.body.clientWidth - 8;
-  const maxH = Math.max(360, parentH() * 0.82);
-  let w = W, h = W / aspect;
-  if (h > maxH) { h = maxH; w = h * aspect; }
-  wrap.style.width = Math.round(w) + "px";
-  wrap.style.height = Math.round(h) + "px";
-  wrap.style.aspectRatio = "auto";
-  setHeight();
-}
-window.addEventListener("resize", fit);
-window.addEventListener("orientationchange", () => setTimeout(fit, 300));
-
-// ---------- Fullscreen camera mode ----------
-function pseudoFS(on) {
-  const fe = window.frameElement;
-  if (!fe) return false;
-  if (on) {
-    if (fe.dataset.oldStyle === undefined) fe.dataset.oldStyle = fe.getAttribute("style") || "";
-    fe.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:" + parentH() + "px;z-index:999999;border:0;background:#000;";
-    return true;
-  }
-  if (fe.dataset.oldStyle !== undefined) {
-    fe.setAttribute("style", fe.dataset.oldStyle);
-    delete fe.dataset.oldStyle;
-  }
-  return false;
-}
-async function enterFS() {
-  fs = true;
-  document.body.classList.add("fs");
-  $("fs").innerHTML = "&#10005;";
-  try {
-    if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
-  } catch (e) { /* fall back below */ }
-  if (!document.fullscreenElement) pseudo = pseudoFS(true);   // iPhone / blocked: fill the page instead
-  setTimeout(fit, 150);
-  setTimeout(fit, 500);
-}
-function exitFS() {
-  fs = false;
-  document.body.classList.remove("fs");
-  $("fs").innerHTML = "&#9974;";
-  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-  if (pseudo) { pseudoFS(false); pseudo = false; }
-  setTimeout(() => { fit(); setHeight(); }, 150);
-}
-$("fs").onclick = () => (fs ? exitFS() : enterFS());
-document.addEventListener("fullscreenchange", () => {
-  if (fs && !pseudo && !document.fullscreenElement) exitFS();
+function show(n){if(!L.length)return;i=(n+L.length)%L.length;im.onload=draw;im.src=L[i].s;draw();}
+$("p").onclick=()=>show(i-1);$("n").onclick=()=>show(i+1);
+$("pip").onclick=async()=>{
+  try{
+    if(document.pictureInPictureElement){await document.exitPictureInPicture();return;}
+    if(!v.srcObject)v.srcObject=cv.captureStream(10);
+    await v.play();draw();await v.requestPictureInPicture();
+    clearInterval(timer);timer=setInterval(draw,200);
+    if("mediaSession" in navigator){const a=(k,f)=>{try{navigator.mediaSession.setActionHandler(k,f)}catch(e){}};
+      a("previoustrack",()=>show(i-1));a("nexttrack",()=>show(i+1));a("play",()=>v.play());a("pause",()=>v.play());}
+    $("m").textContent="";
+  }catch(e){$("m").textContent="PiP not available: "+e.message;}
+};
+v.addEventListener("leavepictureinpicture",()=>clearInterval(timer));
+addEventListener("message",e=>{
+  if(!e.data||e.data.type!=="streamlit:render")return;
+  const a=e.data.args||{};if(a.sig===sig)return;sig=a.sig;L=a.imgs||[];show(Math.min(i,L.length-1));H();
 });
-
-// ---------- Rendering ----------
-function renderInfo() {
-  if (!cur) return;
-  $("info").innerHTML = cur.name + "<br>" + (meta.index + 1) + " / " + meta.total + " &middot; " +
-    meta.doneCount + " captured" + (meta.isDone ? " &#10003;" : "");
-  $("prev").disabled = !meta.prev;
-  $("next").disabled = !meta.next;
-}
-
-function applyOverlay() {
-  overlay.style.opacity = $("opacity").value / 100;
-  overlay.style.transform = "scale(" + $("scale").value / 100 + ")";
-  overlay.style.display = $("show").checked ? "block" : "none";
-  $("grid").style.display = $("gridcb").checked ? "block" : "none";
-  $("opv").textContent = $("opacity").value + "%";
-  $("scv").textContent = $("scale").value + "%";
-}
-["opacity", "scale", "show", "gridcb"].forEach(id => $(id).addEventListener("input", applyOverlay));
-applyOverlay();
-
-$("eye").onclick = () => { $("show").checked = !$("show").checked; applyOverlay(); };
-$("aspect").onchange = () => { aspect = parseFloat($("aspect").value); fit(); startCamera(); };
-
-// ---------- Camera ----------
-async function startCamera() {
-  if (stream) stream.getTracks().forEach(t => t.stop());
-  const a = curAspect();
-  let size;
-  if (a < 1) size = { width: { ideal: Math.round(1920 * a) }, height: { ideal: 1920 } };
-  else       size = { width: { ideal: 1920 }, height: { ideal: Math.round(1920 / a) } };
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: Object.assign({ facingMode: facing }, size), audio: false
-    });
-    video.srcObject = stream;
-    $("msg").textContent = "";
-  } catch (e) {
-    $("msg").textContent = "Camera error: " + e.message + " (allow camera access; the page must be opened over HTTPS or localhost)";
-  }
-}
-$("flip").onclick = () => { facing = facing === "environment" ? "user" : "environment"; startCamera(); };
-
-// ---------- Capture: crop to exactly what the box shows ----------
-function capture() {
-  const vw = video.videoWidth, vh = video.videoHeight;
-  if (!vw || !cur) return;
-  const a = curAspect();
-
-  let sw = vw, sh = vh;
-  if (vw / vh > a) sw = vh * a; else sh = vw / a;
-  const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
-
-  const c = document.createElement("canvas");
-  c.width = Math.round(sw); c.height = Math.round(sh);
-  const ctx = c.getContext("2d");
-  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, c.width, c.height);
-
-  if ($("burn").checked && $("show").checked && overlay.naturalWidth) {
-    const s = $("scale").value / 100;
-    const f = Math.min(c.width / overlay.naturalWidth, c.height / overlay.naturalHeight) * s;
-    const w = overlay.naturalWidth * f, h = overlay.naturalHeight * f;
-    ctx.globalAlpha = $("opacity").value / 100;
-    ctx.drawImage(overlay, (c.width - w) / 2, (c.height - h) / 2, w, h);
-    ctx.globalAlpha = 1;
-  }
-
-  const capId = uid();
-  pending[capId] = { capId: capId, stem: cur.stem, name: cur.name, data: c.toDataURL("image/jpeg", quality) };
-
-  if (navigator.vibrate) navigator.vibrate(30);
-  $("flash").style.opacity = .8;
-  setTimeout(() => $("flash").style.opacity = 0, 120);
-
-  const goNext = $("auto").checked && meta.next;
-  emit(goNext ? meta.next : null);
-}
-
-$("snap").onclick = capture;
-$("prev").onclick = () => { if (meta.prev) emit(meta.prev); };
-$("next").onclick = () => { if (meta.next) emit(meta.next); };
-document.addEventListener("keydown", e => {
-  if (e.target && e.target.tagName === "SELECT") return;
-  if (e.key === "ArrowLeft" && meta.prev) emit(meta.prev);
-  else if (e.key === "ArrowRight" && meta.next) emit(meta.next);
-  else if (e.key === " " || e.key === "Enter") { e.preventDefault(); capture(); }
-});
-
-// ---------- Receive data from Python ----------
-window.addEventListener("message", e => {
-  if (!e.data || e.data.type !== "streamlit:render") return;
-  const a = e.data.args || {};
-  quality = a.quality || 0.92;
-  (a.acked || []).forEach(id => { delete pending[id]; });
-
-  if (a.current) {
-    const key = a.current.stem + ":" + a.current.src.length;
-    if (key !== curKey) { curKey = key; overlay.src = a.current.src; }
-    cur = a.current;
-  }
-  meta = { index: a.index || 0, total: a.total || 0, doneCount: a.done_count || 0,
-           isDone: !!a.is_done, prev: a.prev_stem || null, next: a.next_stem || null };
-  renderInfo();
-  fit();
-});
-
-send("streamlit:componentReady", { apiVersion: 1 });
-fit();
-startCamera();
-new ResizeObserver(setHeight).observe(document.body);
-</script>
-</body>
-</html>
+post("streamlit:componentReady",{apiVersion:1});H();
+</script></body></html>
 '''
 
 # The camera component file is written to the system temp folder (nothing is created next to this script)
